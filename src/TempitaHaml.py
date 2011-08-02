@@ -17,6 +17,7 @@ class TempitaHamlTemplate:
 
     htmlElementRE = re.compile('[_:A-Za-z][-._:A-Za-z0-9]*')
     attrRE = re.compile(':([a-zA-Z]+)\s*=>\s*(.+)')
+    classRE = re.compile('-?[_a-zA-Z]+[_a-zA-Z0-9-]*')
 
     def __init__(self):
         self.output = StringIO()
@@ -39,33 +40,72 @@ class TempitaHamlTemplate:
             return
 
         indent,line = self.parseIndent(line)
-        if indent == self.indent_level - 1:
+        while self.indent_level >= indent and len(self.tag_stack) > 0:
             self.closeTag()
-        else:
-            self.indent_level = indent
-            if line[0] == '%':
-                self.parseNamedTag(line[1:])
+            self.indent_level -= 1
 
-    
+        taglen = len(line)
+        remainder = self.parseNamedTag(line)
+        if line[0] == '.':
+            remainder = self.parseClassTag(remainder)
+            remainder = self.parseIdTag(remainder)
+        else:
+            remainder = self.parseIdTag(remainder)
+            remainder = self.parseClassTag(remainder)
+        if taglen - len(remainder) > 0:
+            remainder = self.parseAttributes(remainder)
+            self.output.write(">")
+            self.indent_level = indent #We only move our indent if we made a tag
+        remainder = self.parseValues(remainder)
+        return   
+
+    """
+    Parse a class tag '.classname', and write the resultant HTML
+
+    """
+    def parseClassTag(self,line):
+        if len(line.strip()) == 0 or line[0] != '.':
+            return line
+        line = line[1:]
+        m = self.classRE.match(line)
+        self.output.write("class='{0}' ".format(line[m.start():m.end()]))
+        return line[m.end():]
+
+    """
+    Parse an id tag '#id', and write the resultant HTML
+
+    """
+    def parseIdTag(self,line):
+        if len(line.strip()) == 0 or line[0] != '#':
+            return line
+        line = line[1:]
+        m = self.classRE.match(line)
+        self.output.write("id='{0}' ".format(line[m.start():m.end()]))
+        return line[m.end():] 
     
     """ 
     Parse a named tag '%div', push it on to our tag stack, and write 
-    the resultant HTML to 'output'. If 
-
+    the resultant HTML to 'output'. In a special case, if the line
+    starts with '.' or '#' push 'div' onto the stack. 
+    
     """
     def parseNamedTag(self,line):
-        match = TempitaHamlTemplate.htmlElementRE.match(line)
-        if not match:
-            raise InvalidFormatError("Missing identifer after %")
-        tag = line[match.start():match.end()]
+        if line[0] == '%':
+            line = line[1:]
+            match = TempitaHamlTemplate.htmlElementRE.match(line)
+            if not match:
+                raise InvalidFormatError("Missing identifer after %")
+            end = match.end()
+            tag = line[match.start():end]
+        elif line[0] == '.' or line[0] == '#':
+            tag = 'div'
+            end = 0
+        else:
+            return line
         self.tag_stack.append(tag)
         self.output.write("<{0} ".format(tag))
-        remainder = line[match.end():]
-
-        remainder = self.parseAttributes(remainder)
-        self.output.write(">")
-        remainder = self.parseValues(remainder)
-        return  
+        return line if end == 0 else line[end:]
+        
 
 
     def parseValues(self,line):
@@ -95,7 +135,7 @@ class TempitaHamlTemplate:
                 m = TempitaHamlTemplate.attrRE.match(attr)
                 if not m:
                     raise AttributeParseError(attr)
-                self.output.write(" {0}={1} ".format(attr[m.start(1):m.end(1)],attr[m.start(2):m.end(2)]))
+                self.output.write("{0}={1} ".format(attr[m.start(1):m.end(1)],attr[m.start(2):m.end(2)]))
             return line[end+1:]
         return line
 
